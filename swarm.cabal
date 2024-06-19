@@ -117,6 +117,9 @@ common ghc2021-extensions
     TypeApplications
     TypeOperators
 
+library
+
+
 library swarm-lang
   import: stan-config, common, ghc2021-extensions
   visibility: public

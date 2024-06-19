@@ -23,3 +23,5 @@ stan.html
 docs/ott/*.tex
 
 .dir-locals.el
+
+.jj/

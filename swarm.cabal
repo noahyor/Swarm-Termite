@@ -1,6 +1,6 @@
 cabal-version: 3.8
 name: swarm
-version: 0.5.0.0
+version: 0.6.0.0
 synopsis: 2D resource gathering game with programmable robots
 description:
   Swarm is a 2D programming and resource gathering
@@ -194,6 +194,7 @@ library swarm-lang
     terminal-size >=0.3 && <1.0,
     text,
     text-rope >=0.2 && <0.3,
+    unicode-show >=0.1 && <0.2,
     vector,
     vty,
     witch,
@@ -214,6 +215,7 @@ library swarm-topography
   exposed-modules:
     Swarm.Game.Location
     Swarm.Game.Scenario.Topography.Area
+    Swarm.Game.Scenario.Topography.Grid
     Swarm.Game.Scenario.Topography.Navigation.Waypoint
     Swarm.Game.Scenario.Topography.Placement
     Swarm.Game.Scenario.Topography.ProtoCell
@@ -223,6 +225,7 @@ library swarm-topography
     Swarm.Game.Scenario.Topography.Structure.Overlay
     Swarm.Game.Scenario.Topography.Structure.Recognition
     Swarm.Game.Scenario.Topography.Structure.Recognition.Log
+    Swarm.Game.Scenario.Topography.Structure.Recognition.Prep
     Swarm.Game.Scenario.Topography.Structure.Recognition.Registry
     Swarm.Game.Scenario.Topography.Structure.Recognition.Symmetry
     Swarm.Game.Scenario.Topography.Structure.Recognition.Type
@@ -239,11 +242,13 @@ library swarm-topography
     base >=4.14 && <4.20,
     containers >=0.6.2 && <0.8,
     extra >=1.7 && <1.8,
+    hashable,
     lens,
     linear >=1.21.6 && <1.24,
     nonempty-containers >=0.3.4 && <0.3.5,
     servant-docs >=0.12 && <0.14,
     text >=1.2.4 && <2.2,
+    unordered-containers,
     vector >=0.12 && <0.14,
     yaml >=0.11 && <0.11.12.0,
 
@@ -310,7 +315,6 @@ library swarm-scenario
   other-modules: Paths_swarm
   autogen-modules: Paths_swarm
   build-depends:
-    AhoCorasick >=0.0.4 && <0.0.5,
     JuicyPixels >=3.3 && <3.4,
     aeson >=2.2 && <2.3,
     array >=0.5.4 && <0.6,
@@ -380,6 +384,7 @@ library swarm-engine
     Swarm.Game.Scenario.Topography.Structure.Recognition.Tracking
     Swarm.Game.ScenarioInfo
     Swarm.Game.State
+    Swarm.Game.State.Initialize
     Swarm.Game.State.Robot
     Swarm.Game.State.Runtime
     Swarm.Game.State.Substate
@@ -437,7 +442,6 @@ library swarm-engine
     text >=1.2.4 && <2.2,
     time >=1.9 && <1.15,
     transformers >=0.5 && <0.7,
-    transformers >=0.5.6.2 && <0.6.2.0,
     unordered-containers >=0.2.14 && <0.3,
     warp,
     witch >=1.1.1.0 && <1.3,
@@ -667,6 +671,14 @@ library swarm-tui
   exposed-modules:
     Swarm.TUI.Border
     Swarm.TUI.Controller
+    Swarm.TUI.Controller.EventHandlers
+    Swarm.TUI.Controller.EventHandlers.Frame
+    Swarm.TUI.Controller.EventHandlers.Main
+    Swarm.TUI.Controller.EventHandlers.REPL
+    Swarm.TUI.Controller.EventHandlers.Robot
+    Swarm.TUI.Controller.EventHandlers.World
+    Swarm.TUI.Controller.SaveScenario
+    Swarm.TUI.Controller.UpdateUI
     Swarm.TUI.Controller.Util
     Swarm.TUI.Editor.Controller
     Swarm.TUI.Editor.Json
@@ -682,9 +694,13 @@ library swarm-tui
     Swarm.TUI.Launch.View
     Swarm.TUI.List
     Swarm.TUI.Model
+    Swarm.TUI.Model.Achievements
+    Swarm.TUI.Model.Event
     Swarm.TUI.Model.Goal
+    Swarm.TUI.Model.KeyBindings
     Swarm.TUI.Model.Menu
     Swarm.TUI.Model.Name
+    Swarm.TUI.Model.Popup
     Swarm.TUI.Model.Repl
     Swarm.TUI.Model.StateUpdate
     Swarm.TUI.Model.Structure
@@ -698,6 +714,7 @@ library swarm-tui
     Swarm.TUI.View.CellDisplay
     Swarm.TUI.View.Logo
     Swarm.TUI.View.Objective
+    Swarm.TUI.View.Popup
     Swarm.TUI.View.Structure
     Swarm.TUI.View.Util
 
@@ -707,7 +724,7 @@ library swarm-tui
     aeson >=2.2 && <2.3,
     array >=0.5.4 && <0.6,
     base >=4.14 && <4.20,
-    brick >=2.1.1 && <2.4,
+    brick >=2.1.1 && <2.5,
     brick-list-skip >=0.1.1.2 && <0.2,
     bytestring >=0.10 && <0.13,
     clock >=0.8.2 && <0.9,
@@ -732,7 +749,6 @@ library swarm-tui
     text-zipper >=0.10 && <0.14,
     time >=1.9 && <1.15,
     transformers >=0.5 && <0.7,
-    transformers >=0.5.6.2 && <0.6.2.0,
     vector >=0.12 && <0.14,
     vty >=6.1 && <6.3,
     warp >=3.2 && <3.5,
@@ -850,7 +866,6 @@ test-suite swarm-unit
     TestParse
     TestPedagogy
     TestPretty
-    TestRecipeCoverage
     TestRepl
     TestRequirements
     TestScoring
@@ -870,7 +885,6 @@ test-suite swarm-unit
     megaparsec,
     mtl,
     tasty >=0.10 && <1.6,
-    tasty-expected-failure >=0.12 && <0.13,
     tasty-hunit >=0.10 && <0.11,
     tasty-quickcheck >=0.10 && <0.11,
     text,
@@ -894,6 +908,7 @@ test-suite swarm-unit
 test-suite swarm-integration
   import: stan-config, common, ghc2021-extensions
   main-is: Main.hs
+  other-modules: TestRecipeCoverage
   type: exitcode-stdio-1.0
   build-depends:
     -- Imports shared with the library don't need bounds

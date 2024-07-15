@@ -13,6 +13,7 @@ module Swarm.TUI.Model.UI (
   UIInventory (..),
   GoalDisplay (..),
   uiGameplay,
+  uiPopups,
   uiTiming,
   uiInventory,
   uiMenu,
@@ -65,6 +66,7 @@ import Control.Effect.Accum
 import Control.Effect.Lift
 import Control.Lens hiding (from, (<.>))
 import Data.Bits (FiniteBits (finiteBitSize))
+import Data.List.Extra (enumerate)
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Sequence (Seq)
@@ -87,6 +89,7 @@ import Swarm.TUI.Launch.Prep
 import Swarm.TUI.Model.Goal
 import Swarm.TUI.Model.Menu
 import Swarm.TUI.Model.Name
+import Swarm.TUI.Model.Popup
 import Swarm.TUI.Model.Repl
 import Swarm.TUI.Model.Structure
 import Swarm.TUI.View.Attribute.Attr (swarmAttrMap)
@@ -280,6 +283,7 @@ data UIState = UIState
   , _uiAchievements :: Map CategorizedAchievement Attainment
   , _uiAttrMap :: AttrMap
   , _uiGameplay :: UIGameplay
+  , _uiPopups :: PopupState
   }
 
 -- * Lenses for UIState
@@ -312,6 +316,9 @@ uiAttrMap :: Lens' UIState AttrMap
 -- | UI active during live gameplay
 uiGameplay :: Lens' UIState UIGameplay
 
+-- | Queue of popups to display
+uiPopups :: Lens' UIState PopupState
+
 -- * UIState initialization
 
 -- | The initial state of the focus ring.
@@ -319,7 +326,7 @@ uiGameplay :: Lens' UIState UIGameplay
 -- focus ring. However, the REPL already uses Tab. So, to is not used
 -- at all right now for navigating the toplevel focus ring.
 initFocusRing :: FocusRing Name
-initFocusRing = focusRing $ map FocusablePanel listEnums
+initFocusRing = focusRing $ map FocusablePanel enumerate
 
 -- | The initial tick speed.
 defaultInitLgTicksPerSecond :: Int
@@ -340,7 +347,7 @@ initUIState ::
   m UIState
 initUIState speedFactor showMainMenu cheatMode = do
   historyT <- sendIO $ readFileMayT =<< getSwarmHistoryPath False
-  let history = maybe [] (map REPLEntry . T.lines) historyT
+  let history = maybe [] (map mkREPLSubmission . T.lines) historyT
   startTime <- sendIO $ getTime Monotonic
   achievements <- loadAchievementsInfo
   launchConfigPanel <- sendIO initConfigPanel
@@ -352,6 +359,7 @@ initUIState speedFactor showMainMenu cheatMode = do
           , _uiLaunchConfig = launchConfigPanel
           , _uiAchievements = M.fromList $ map (view achievement &&& id) achievements
           , _uiAttrMap = swarmAttrMap
+          , _uiPopups = initPopupState
           , _uiGameplay =
               UIGameplay
                 { _uiFocusRing = initFocusRing

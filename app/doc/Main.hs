@@ -8,14 +8,14 @@ import Data.Foldable qualified
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Options.Applicative
-import Swarm.Doc.Gen (GenerateDocs (..), PageAddress (..), SheetType (..), generateDocs)
+import Swarm.Doc.Gen (EdgeFilter (..), GenerateDocs (..), PageAddress (..), SheetType (..), generateDocs)
 import Swarm.Doc.Keyword (EditorType (..))
 
 cliParser :: Parser GenerateDocs
 cliParser =
   subparser $
     mconcat
-      [ command "recipes" (info (pure RecipeGraph) $ progDesc "Output graphviz dotfile of entity dependencies based on recipes")
+      [ command "recipes" (info (RecipeGraph <$> edgeFilter <**> helper) $ progDesc "Output graphviz dotfile of entity dependencies based on recipes")
       , command "editors" (info (EditorKeywords <$> editor <**> helper) $ progDesc "Output editor keywords")
       , command "keys" (info (pure SpecialKeyNames) $ progDesc "Output list of recognized special key names")
       , command "cheatsheet" (info (CheatSheet <$> address <*> cheatsheet <**> helper) $ progDesc "Output nice Wiki tables")
@@ -30,6 +30,13 @@ cliParser =
       , Just Emacs <$ switch (long "emacs" <> help "Generate for the Emacs editor")
       , Just Vim <$ switch (long "vim" <> help "Generate for the Vim editor")
       ]
+  edgeFilter :: Parser EdgeFilter
+  edgeFilter =
+    Data.Foldable.asum
+      [ pure NoFilter
+      , FilterForward <$ switch (long "forward" <> help "Show only forward edges")
+      , FilterNext <$ switch (long "next" <> help "Show only edges to next group")
+      ]
   address :: Parser PageAddress
   address =
     let replace a b = T.unpack . T.replace a b . T.pack
@@ -42,17 +49,16 @@ cliParser =
                   <> help ("Set the address of " <> replace "-" " " n <> ". Default no link.")
               )
      in PageAddress <$> opt "entities-page" <*> opt "commands-page" <*> opt "capabilities-page" <*> opt "recipes-page"
-  cheatsheet :: Parser (Maybe SheetType)
+  cheatsheet :: Parser SheetType
   cheatsheet =
     Data.Foldable.asum
-      [ pure Nothing
-      , Just Entities <$ switch (long "entities" <> help "Generate entities page (uses data from entities.yaml)")
-      , Just Terrain <$ switch (long "terrain" <> help "Generate terrain page (uses data from terrains.yaml)")
-      , Just Recipes <$ switch (long "recipes" <> help "Generate recipes page (uses data from recipes.yaml)")
-      , Just Capabilities <$ switch (long "capabilities" <> help "Generate capabilities page (uses entity map)")
-      , Just Commands <$ switch (long "commands" <> help "Generate commands page (uses constInfo, constCaps and inferConst)")
-      , Just CommandMatrix <$ switch (long "matrix" <> help "Generate commands matrix page")
-      , Just Scenario <$ switch (long "scenario" <> help "Generate scenario schema page")
+      [ flag' Entities (long "entities" <> help "Generate entities page (uses data from entities.yaml)")
+      , flag' Terrain (long "terrain" <> help "Generate terrain page (uses data from terrains.yaml)")
+      , flag' Recipes (long "recipes" <> help "Generate recipes page (uses data from recipes.yaml)")
+      , flag' Capabilities (long "capabilities" <> help "Generate capabilities page (uses entity map)")
+      , flag' Commands (long "commands" <> help "Generate commands page (uses constInfo, constCaps and inferConst)")
+      , flag' CommandMatrix (long "matrix" <> help "Generate commands matrix page")
+      , flag' Scenario (long "scenario" <> help "Generate scenario schema page")
       ]
 
 cliInfo :: ParserInfo GenerateDocs

@@ -69,6 +69,7 @@ import Swarm.Language.Pipeline (processTerm)
 import Swarm.Language.Pretty (prettyString)
 import Swarm.Log
 import Swarm.TUI.Model (
+  KeyEventHandlingState,
   defaultAppOpts,
   gameState,
   runtimeState,
@@ -84,6 +85,7 @@ import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.ExpectedFailure (expectFailBecause)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, assertFailure, testCase)
+import TestRecipeCoverage
 import Witch (into)
 
 isUnparseableTest :: FilePath -> Bool
@@ -95,11 +97,12 @@ main = do
   scenarioPaths <- findAllWithExt "data/scenarios" "yaml"
   let (unparseableScenarios, parseableScenarios) = partition isUnparseableTest scenarioPaths
   scenarioPrograms <- findAllWithExt "data/scenarios" "sw"
-  (rs, ui) <- do
+  (rs, ui, key) <- do
     out <- runM . runThrow @SystemFailure $ initPersistentState defaultAppOpts
     either (assertFailure . prettyString) return out
   let scenarioInputs = gsiScenarioInputs $ initState $ rs ^. stdGameConfigInputs
       rs' = rs & eventLog .~ mempty
+  recipeTests <- testRecipeCoverage
   defaultMain $
     testGroup
       "Tests"
@@ -108,8 +111,9 @@ main = do
       , exampleTests scenarioPrograms
       , scenarioParseTests scenarioInputs parseableScenarios
       , scenarioParseInvalidTests scenarioInputs unparseableScenarios
-      , testScenarioSolutions rs' ui
+      , testScenarioSolutions rs' ui key
       , testEditorFiles
+      , recipeTests
       ]
 
 testNoLoadingErrors :: RuntimeState -> TestTree
@@ -183,8 +187,8 @@ time = \case
 
 data ShouldCheckBadErrors = CheckForBadErrors | AllowBadErrors deriving (Eq, Show)
 
-testScenarioSolutions :: RuntimeState -> UIState -> TestTree
-testScenarioSolutions rs ui =
+testScenarioSolutions :: RuntimeState -> UIState -> KeyEventHandlingState -> TestTree
+testScenarioSolutions rs ui key =
   testGroup
     "Test scenario solutions"
     [ testGroup
@@ -480,7 +484,7 @@ testScenarioSolutions rs ui =
 
   testSolution' :: Time -> FilePath -> ShouldCheckBadErrors -> (GameState -> Assertion) -> TestTree
   testSolution' s p shouldCheckBadErrors verify = testCase p $ do
-    out <- runM . runThrow @SystemFailure $ constructAppState rs ui $ defaultAppOpts {userScenario = Just p}
+    out <- runM . runThrow @SystemFailure $ constructAppState rs ui key $ defaultAppOpts {userScenario = Just p}
     case out of
       Left err -> assertFailure $ prettyString err
       Right appState -> case appState ^. gameState . winSolution of

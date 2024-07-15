@@ -3,6 +3,7 @@ dist-newstyle/
 TAGS
 
 .vscode/
+!.vscode/cspell.json
 
 cabal.project.local
 hie.yaml
@@ -15,6 +16,7 @@ stan.html
 
 .swarm_history
 
+*.sqlite
 *.db
 *.orig
 *.aux

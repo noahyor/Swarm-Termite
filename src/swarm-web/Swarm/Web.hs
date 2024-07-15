@@ -64,7 +64,7 @@ import Servant.Docs (ToCapture)
 import Servant.Docs qualified as SD
 import Servant.Docs.Internal qualified as SD (renderCurlBasePath)
 import Swarm.Doc.Command
-import Swarm.Game.Entity (EntityName)
+import Swarm.Game.Entity (EntityName, entityName)
 import Swarm.Game.Robot
 import Swarm.Game.Scenario.Objective
 import Swarm.Game.Scenario.Objective.Graph
@@ -79,7 +79,7 @@ import Swarm.Game.State.Substate
 import Swarm.Game.Step.Path.Type
 import Swarm.Language.Pipeline (processTermEither)
 import Swarm.Language.Pretty (prettyTextLine)
-import Swarm.TUI.Model
+import Swarm.TUI.Model hiding (SwarmKeyDispatchers (..))
 import Swarm.TUI.Model.Goal
 import Swarm.TUI.Model.Repl (REPLHistItem, replHistory, replSeq)
 import Swarm.TUI.Model.UI
@@ -167,7 +167,7 @@ mkApp state events =
     :<|> codeRunHandler events
     :<|> pathsLogHandler state
     :<|> cmdMatrixHandler state
-    :<|> replHandler state
+    :<|> replHistHandler state
     :<|> mapViewHandler state
 
 robotsHandler :: ReadableIORef AppState -> Handler [Robot]
@@ -214,7 +214,9 @@ goalsHandler appStateRef = do
 recogLogHandler :: ReadableIORef AppState -> Handler [SearchLog EntityName]
 recogLogHandler appStateRef = do
   appState <- liftIO (readIORef appStateRef)
-  return $ appState ^. gameState . discovery . structureRecognition . recognitionLog
+  return $
+    map (fmap (view entityName)) $
+      appState ^. gameState . discovery . structureRecognition . recognitionLog
 
 recogFoundHandler :: ReadableIORef AppState -> Handler [StructureLocation]
 recogFoundHandler appStateRef = do
@@ -247,8 +249,8 @@ pathsLogHandler appStateRef = do
 cmdMatrixHandler :: ReadableIORef AppState -> Handler CommandCatalog
 cmdMatrixHandler _ = pure getCatalog
 
-replHandler :: ReadableIORef AppState -> Handler [REPLHistItem]
-replHandler appStateRef = do
+replHistHandler :: ReadableIORef AppState -> Handler [REPLHistItem]
+replHistHandler appStateRef = do
   appState <- liftIO (readIORef appStateRef)
   let replHistorySeq = appState ^. uiState . uiGameplay . uiREPL . replHistory . replSeq
       items = toList replHistorySeq

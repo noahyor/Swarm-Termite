@@ -30,14 +30,14 @@ module Swarm.Language.Syntax.Constants (
 import Data.Aeson.Types hiding (Key)
 import Data.Data (Data)
 import Data.Int (Int32)
+import Data.List.Extra (enumerate)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text hiding (filter, length, map)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 import Swarm.Language.Syntax.CommandMetadata
-import Swarm.Util qualified as Util
-import Witch.From (from)
+import Swarm.Util (showT)
 
 ------------------------------------------------------------
 -- Constants
@@ -312,7 +312,7 @@ data Const
   deriving (Eq, Ord, Enum, Bounded, Data, Show, Generic, FromJSON, ToJSON, FromJSONKey, ToJSONKey)
 
 allConst :: [Const]
-allConst = Util.listEnums
+allConst = enumerate
 
 data ConstInfo = ConstInfo
   { syntax :: Text
@@ -762,7 +762,7 @@ constInfo c = case c of
   Parent -> function 0 $ shortDoc (Set.singleton $ Query APriori) "Get a reference to the robot's parent."
   Base -> function 0 $ shortDoc (Set.singleton $ Query APriori) "Get a reference to the base."
   Meet -> command 0 Intangible $ shortDoc (Set.singleton $ Query $ Sensing RobotSensing) "Get a reference to a nearby actor, if there is one."
-  MeetAll -> command 0 long $ shortDoc (Set.fromList [Mutation $ RobotChange BehaviorChange, Query $ Sensing RobotSensing]) "Run a command for each nearby actor."
+  MeetAll -> command 0 Intangible $ shortDoc (Set.singleton $ Query $ Sensing RobotSensing) "Return a list of all the nearby actors."
   Whoami -> command 0 Intangible $ shortDoc (Set.singleton $ Query $ Sensing RobotSensing) "Get the robot's display name."
   Setname -> command 1 short $ shortDoc (Set.singleton $ Mutation $ RobotChange BehaviorChange) "Set the robot's display name."
   Random ->
@@ -887,7 +887,7 @@ constInfo c = case c of
       }
 
   lowShow :: Show a => a -> Text
-  lowShow a = toLower (from (show a))
+  lowShow = toLower . showT
 
 -- | Maximum perception distance for
 -- 'Chirp' and 'Sniff' commands

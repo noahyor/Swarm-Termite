@@ -57,6 +57,7 @@ import Data.Functor (($>))
 import Data.IntMap qualified as IM
 import Data.List (intersperse)
 import Data.List qualified as L
+import Data.List.Extra (enumerate)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.List.NonEmpty qualified as NE
 import Data.List.Split (chunksOf)
@@ -124,6 +125,7 @@ import Swarm.Language.Typecheck (inferConst)
 import Swarm.Log
 import Swarm.TUI.Border
 import Swarm.TUI.Controller (ticksPerFrameCap)
+import Swarm.TUI.Controller.EventHandlers (allEventHandlers, mainEventHandlers, replEventHandlers, robotEventHandlers, worldEventHandlers)
 import Swarm.TUI.Controller.Util (hasDebugCapability)
 import Swarm.TUI.Editor.Model
 import Swarm.TUI.Editor.View qualified as EV
@@ -131,7 +133,9 @@ import Swarm.TUI.Inventory.Sorting (renderSortMethod)
 import Swarm.TUI.Launch.Model
 import Swarm.TUI.Launch.View
 import Swarm.TUI.Model
+import Swarm.TUI.Model.Event qualified as SE
 import Swarm.TUI.Model.Goal (goalsContent, hasAnythingToShow)
+import Swarm.TUI.Model.KeyBindings (handlerNameKeysDescription)
 import Swarm.TUI.Model.Repl
 import Swarm.TUI.Model.UI
 import Swarm.TUI.Panel
@@ -140,6 +144,7 @@ import Swarm.TUI.View.Attribute.Attr
 import Swarm.TUI.View.CellDisplay
 import Swarm.TUI.View.Logo
 import Swarm.TUI.View.Objective qualified as GR
+import Swarm.TUI.View.Popup
 import Swarm.TUI.View.Structure qualified as SR
 import Swarm.TUI.View.Util as VU
 import Swarm.Util
@@ -151,20 +156,24 @@ import Text.Printf
 import Text.Wrap
 import Witch (into)
 
--- | The main entry point for drawing the entire UI.  Figures out
---   which menu screen we should show (if any), or just the game itself.
+-- | The main entry point for drawing the entire UI.
 drawUI :: AppState -> [Widget Name]
-drawUI s
-  | s ^. uiState . uiPlaying = drawGameUI s
-  | otherwise = case s ^. uiState . uiMenu of
-      -- We should never reach the NoMenu case if uiPlaying is false; we would have
-      -- quit the app instead.  But just in case, we display the main menu anyway.
-      NoMenu -> [drawMainMenuUI s (mainMenu NewGame)]
-      MainMenu l -> [drawMainMenuUI s l]
-      NewGameMenu stk -> drawNewGameMenuUI stk $ s ^. uiState . uiLaunchConfig
-      AchievementsMenu l -> [drawAchievementsMenuUI s l]
-      MessagesMenu -> [drawMainMessages s]
-      AboutMenu -> [drawAboutMenuUI (s ^. runtimeState . appData . at "about")]
+drawUI s = drawPopups s : mainLayers
+ where
+  mainLayers
+    | s ^. uiState . uiPlaying = drawGameUI s
+    | otherwise = drawMenuUI s
+
+drawMenuUI :: AppState -> [Widget Name]
+drawMenuUI s = case s ^. uiState . uiMenu of
+  -- We should never reach the NoMenu case if uiPlaying is false; we would have
+  -- quit the app instead.  But just in case, we display the main menu anyway.
+  NoMenu -> [drawMainMenuUI s (mainMenu NewGame)]
+  MainMenu l -> [drawMainMenuUI s l]
+  NewGameMenu stk -> drawNewGameMenuUI stk $ s ^. uiState . uiLaunchConfig
+  AchievementsMenu l -> [drawAchievementsMenuUI s l]
+  MessagesMenu -> [drawMainMessages s]
+  AboutMenu -> [drawAboutMenuUI (s ^. runtimeState . appData . at "about")]
 
 drawMainMessages :: AppState -> Widget Name
 drawMainMessages s = renderDialog dial . padBottom Max . scrollList $ drawLogs ls
@@ -379,7 +388,7 @@ makeBestScoreRows scenarioStat =
     , Just $ describeProgress b
     )
    where
-    maxLeftColumnWidth = maximum (map (T.length . describeCriteria) listEnums)
+    maxLeftColumnWidth = maximum (map (T.length . describeCriteria) enumerate)
     mkCriteriaRow =
       withAttr dimAttr
         . padLeft Max
@@ -622,7 +631,7 @@ drawDialog s = case s ^. uiState . uiGameplay . uiModal of
 -- | Draw one of the various types of modal dialog.
 drawModal :: AppState -> ModalType -> Widget Name
 drawModal s = \case
-  HelpModal -> helpWidget (s ^. gameState . randomness . seed) (s ^. runtimeState . webPort)
+  HelpModal -> helpWidget (s ^. gameState . randomness . seed) (s ^. runtimeState . webPort) (s ^. keyEventHandling)
   RobotsModal -> robotsListWidget s
   RecipesModal -> availableListWidget (s ^. gameState) RecipeList
   CommandsModal -> commandsListWidget (s ^. gameState)
@@ -781,59 +790,53 @@ robotsListWidget s = hCenter table
   debugging = creative && cheat
   g = s ^. gameState
 
-helpWidget :: Seed -> Maybe Port -> Widget Name
-helpWidget theSeed mport =
-  padTop (Pad 1) $
-    (hBox . map (padLeftRight 2) $ [helpKeys, info])
-      <=> padTop (Pad 1) (hCenter tips)
+helpWidget :: Seed -> Maybe Port -> KeyEventHandlingState -> Widget Name
+helpWidget theSeed mport keyState =
+  padLeftRight 2 . vBox $ padTop (Pad 1) <$> [info, helpKeys, tips]
  where
   tips =
     vBox
-      [ txt "Have questions? Want some tips? Check out:"
-      , txt " "
-      , txt $ "  - The Swarm wiki, " <> wikiUrl
-      , txt "  - The #swarm IRC channel on Libera.Chat"
+      [ heading boldAttr "Have questions? Want some tips? Check out:"
+      , txt "  - The Swarm wiki, " <+> hyperlink wikiUrl (txt wikiUrl)
+      , txt "  - The Swarm Discord server at " <+> hyperlink swarmDiscord (txt swarmDiscord)
       ]
   info =
     vBox
-      [ txt "Configuration"
-      , txt " "
+      [ heading boldAttr "Configuration"
       , txt ("Seed: " <> into @Text (show theSeed))
       , txt ("Web server port: " <> maybe "none" (into @Text . show) mport)
       ]
   helpKeys =
     vBox
-      [ txt "Keybindings"
-      , txt " "
-      , mkTable glKeyBindings
+      [ heading boldAttr "Keybindings"
+      , keySection "Main (always active)" mainEventHandlers
+      , keySection "REPL panel" replEventHandlers
+      , keySection "World view panel" worldEventHandlers
+      , keySection "Robot inventory panel" robotEventHandlers
       ]
-  mkTable =
+  keySection name handlers =
+    padBottom (Pad 1) $
+      vBox
+        [ heading italicAttr name
+        , mkKeyTable handlers
+        ]
+  mkKeyTable =
     BT.renderTable
       . BT.surroundingBorder False
       . BT.rowBorders False
       . BT.table
-      . map toRow
-  toRow (k, v) = [padRight (Pad 1) $ txt k, padLeft (Pad 1) $ txt v]
-  glKeyBindings =
-    [ ("F1", "Help")
-    , ("F2", "Robots list")
-    , ("F3", "Available recipes")
-    , ("F4", "Available commands")
-    , ("F5", "Messages")
-    , ("F6", "Structures")
-    , ("Ctrl-g", "show goal")
-    , ("Ctrl-p", "pause")
-    , ("Ctrl-o", "single step")
-    , ("Ctrl-z", "decrease speed")
-    , ("Ctrl-w", "increase speed")
-    , ("Ctrl-q", "quit or restart the current scenario")
-    , ("Meta-,", "collapse/expand REPL")
-    , ("Meta-h", "hide robots for 2s")
-    , ("Meta-w", "focus on the world map")
-    , ("Meta-e", "focus on the robot inventory")
-    , ("Meta-r", "focus on the REPL")
-    , ("Meta-t", "focus on the info panel")
+      . map (toRow . keyHandlerToText)
+  heading attr = padBottom (Pad 1) . withAttr attr . txt
+  toRow (n, k, d) =
+    [ padRight (Pad 1) $ txtFilled maxN n
+    , padLeftRight 1 $ txtFilled maxK k
+    , padLeft (Pad 1) $ txtFilled maxD d
     ]
+  keyHandlerToText = handlerNameKeysDescription (keyState ^. keyConfig)
+  -- Get maximum width of the table columns so it all neatly aligns
+  txtFilled n t = padRight (Pad $ max 0 (n - textWidth t)) $ txt t
+  (maxN, maxK, maxD) = map3 (maximum . map textWidth) . unzip3 $ keyHandlerToText <$> allEventHandlers
+  map3 f (n, k, d) = (f n, f k, f d)
 
 data NotificationList = RecipeList | MessageList
 
@@ -951,30 +954,31 @@ colorSeverity = \case
 drawModalMenu :: AppState -> Widget Name
 drawModalMenu s = vLimit 1 . hBox $ map (padLeftRight 1 . drawKeyCmd) globalKeyCmds
  where
-  notificationKey :: Getter GameState (Notifications a) -> Text -> Text -> Maybe (KeyHighlight, Text, Text)
+  notificationKey :: Getter GameState (Notifications a) -> SE.MainEvent -> Text -> Maybe (KeyHighlight, Text, Text)
   notificationKey notifLens key name
     | null (s ^. gameState . notifLens . notificationsContent) = Nothing
     | otherwise =
         let highlight
               | s ^. gameState . notifLens . notificationsCount > 0 = Alert
               | otherwise = NoHighlight
-         in Just (highlight, key, name)
+         in Just (highlight, keyM key, name)
 
   -- Hides this key if the recognizable structure list is empty
   structuresKey =
     if null $ s ^. gameState . discovery . structureRecognition . automatons . originalStructureDefinitions
       then Nothing
-      else Just (NoHighlight, "F6", "Structures")
+      else Just (NoHighlight, keyM SE.ViewStructuresEvent, "Structures")
 
   globalKeyCmds =
     catMaybes
-      [ Just (NoHighlight, "F1", "Help")
-      , Just (NoHighlight, "F2", "Robots")
-      , notificationKey (discovery . availableRecipes) "F3" "Recipes"
-      , notificationKey (discovery . availableCommands) "F4" "Commands"
-      , notificationKey messageNotifications "F5" "Messages"
+      [ Just (NoHighlight, keyM SE.ViewHelpEvent, "Help")
+      , Just (NoHighlight, keyM SE.ViewRobotsEvent, "Robots")
+      , notificationKey (discovery . availableRecipes) SE.ViewRecipesEvent "Recipes"
+      , notificationKey (discovery . availableCommands) SE.ViewCommandsEvent "Commands"
+      , notificationKey messageNotifications SE.ViewMessagesEvent "Messages"
       , structuresKey
       ]
+  keyM = VU.bindingText s . SE.Main
 
 -- | Draw a menu explaining what key commands are available for the
 --   current panel.  This menu is displayed as one or two lines in
@@ -1039,15 +1043,28 @@ drawKeyMenu s =
         True -> "Creative"
   globalKeyCmds =
     catMaybes
-      [ may goal (NoHighlight, "^g", "goal")
-      , may cheat (NoHighlight, "^v", "creative")
-      , may cheat (NoHighlight, "^e", "editor")
-      , Just (NoHighlight, "^p", if isPaused then "unpause" else "pause")
-      , may isPaused (NoHighlight, "^o", "step")
-      , may (isPaused && hasDebug) (if s ^. uiState . uiGameplay . uiShowDebug then Alert else NoHighlight, "M-d", "debug")
-      , Just (NoHighlight, "^zx", "speed")
-      , Just (NoHighlight, "M-,", if s ^. uiState . uiGameplay . uiShowREPL then "hide REPL" else "show REPL")
-      , Just (if s ^. uiState . uiGameplay . uiShowRobots then NoHighlight else Alert, "M-h", "hide robots")
+      [ may goal (NoHighlight, keyM SE.ViewGoalEvent, "goal")
+      , may cheat (NoHighlight, keyM SE.ToggleCreativeModeEvent, "creative")
+      , may cheat (NoHighlight, keyM SE.ToggleWorldEditorEvent, "editor")
+      , Just (NoHighlight, keyM SE.PauseEvent, if isPaused then "unpause" else "pause")
+      , may isPaused (NoHighlight, keyM SE.RunSingleTickEvent, "step")
+      , may
+          (isPaused && hasDebug)
+          ( if s ^. uiState . uiGameplay . uiShowDebug then Alert else NoHighlight
+          , keyM SE.ShowCESKDebugEvent
+          , "debug"
+          )
+      , Just (NoHighlight, keyM SE.IncreaseTpsEvent <> "/" <> keyM SE.DecreaseTpsEvent, "speed")
+      , Just
+          ( NoHighlight
+          , keyM SE.ToggleREPLVisibilityEvent
+          , if s ^. uiState . uiGameplay . uiShowREPL then "hide REPL" else "show REPL"
+          )
+      , Just
+          ( if s ^. uiState . uiGameplay . uiShowRobots then NoHighlight else Alert
+          , keyM SE.HideRobotsEvent
+          , "hide robots"
+          )
       ]
   may b = if b then Just else const Nothing
 
@@ -1059,27 +1076,33 @@ drawKeyMenu s =
     [ ("↓↑", "history")
     ]
       ++ [("Enter", "execute") | not isReplWorking]
-      ++ [("^c", "cancel") | isReplWorking]
-      ++ [("M-p", renderPilotModeSwitch ctrlMode) | creative]
-      ++ [("M-k", renderHandlerModeSwitch ctrlMode) | handlerInstalled]
+      ++ [(keyR SE.CancelRunningProgramEvent, "cancel") | isReplWorking]
+      ++ [(keyR SE.TogglePilotingModeEvent, renderPilotModeSwitch ctrlMode) | creative]
+      ++ [(keyR SE.ToggleCustomKeyHandlingEvent, renderHandlerModeSwitch ctrlMode) | handlerInstalled]
       ++ [("PgUp/Dn", "scroll")]
   keyCmdsFor (Just (FocusablePanel WorldPanel)) =
-    [ ("←↓↑→ / hjkl", "scroll") | canScroll
-    ]
-      ++ [("c", "recenter") | not viewingBase]
-      ++ [("f", "FPS")]
+    [(T.intercalate "/" $ map keyW enumerate, "scroll") | canScroll]
+      ++ [(keyW SE.ViewBaseEvent, "recenter") | not viewingBase]
+      ++ [(keyW SE.ShowFpsEvent, "FPS")]
   keyCmdsFor (Just (FocusablePanel RobotPanel)) =
     ("Enter", "pop out")
       : if isJust inventorySearch
         then [("Esc", "exit search")]
         else
-          [ ("m", "make")
-          , ("0", (if showZero then "hide" else "show") <> " 0")
-          , (":/;", T.unwords ["Sort:", renderSortMethod inventorySort])
-          , ("/", "search")
+          [ (keyE SE.MakeEntityEvent, "make")
+          , (keyE SE.ShowZeroInventoryEntitiesEvent, (if showZero then "hide" else "show") <> " 0")
+          ,
+            ( keyE SE.SwitchInventorySortDirection <> "/" <> keyE SE.CycleInventorySortEvent
+            , T.unwords ["Sort:", renderSortMethod inventorySort]
+            )
+          , (keyE SE.SearchInventoryEvent, "search")
           ]
   keyCmdsFor (Just (FocusablePanel InfoPanel)) = []
   keyCmdsFor _ = []
+  keyM = VU.bindingText s . SE.Main
+  keyR = VU.bindingText s . SE.REPL
+  keyE = VU.bindingText s . SE.Robot
+  keyW = VU.bindingText s . SE.World
 
 data KeyHighlight = NoHighlight | Alert | PanelSpecific
 
@@ -1568,7 +1591,7 @@ drawREPL s =
  where
   -- rendered history lines fitting above REPL prompt
   history :: [Widget n]
-  history = map fmt . toList . getSessionREPLHistoryItems $ theRepl ^. replHistory
+  history = map fmt . filter (not . isREPLSaved) . toList . getSessionREPLHistoryItems $ theRepl ^. replHistory
   currentPrompt :: Widget Name
   currentPrompt = case (isActive <$> base, theRepl ^. replControlMode) of
     (_, Handling) -> padRight Max $ txt "[key handler running, M-k to toggle]"
@@ -1580,9 +1603,10 @@ drawREPL s =
   -- indexing that may be an alternative to this:
   base = s ^. gameState . robotInfo . robotMap . at 0
 
-  fmt (REPLEntry e) = txt $ "> " <> e
-  fmt (REPLOutput t) = txt t
-  fmt (REPLError t) = txtWrapWith indent2 {preserveIndentation = True} t
+  fmt (REPLHistItem itemType t) = case itemType of
+    REPLEntry {} -> txt $ "> " <> t
+    REPLOutput -> txt t
+    REPLError -> txtWrapWith indent2 {preserveIndentation = True} t
   mayDebug = [drawRobotMachine s True | s ^. uiState . uiGameplay . uiShowDebug]
 
 ------------------------------------------------------------
